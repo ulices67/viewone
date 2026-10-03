@@ -68,7 +68,8 @@ public final class ScreenshotObserver: NSObject, ObservableObject, PHPhotoLibrar
             self.fetchResult = details.fetchResultAfterChanges
 
             // Detect newly inserted screenshots
-            if let inserted = details.insertedObjects, !inserted.isEmpty {
+            let inserted = details.insertedObjects
+            if !inserted.isEmpty {
                 for asset in inserted {
                     await self.processSingleAsset(asset)
                 }
