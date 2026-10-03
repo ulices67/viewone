@@ -2,7 +2,6 @@ import SwiftUI
 
 public struct CaptureCardView: View {
     public let item: CapturedItem
-    @ObservedObject private var vaultManager = VaultManager.shared
     @State private var image: UIImage?
 
     public init(item: CapturedItem) {
@@ -101,14 +100,14 @@ public struct CaptureCardView: View {
         .background(Color(UIColor.systemBackground))
         .cornerRadius(18)
         .shadow(color: Color.black.opacity(0.06), radius: 8, x: 0, y: 3)
-        .onAppear {
+        .task {
             loadImage()
         }
     }
 
     private func loadImage() {
         if image == nil {
-            self.image = vaultManager.decryptImage(for: item)
+            self.image = ScreenshotObserver.shared.getImage(for: item)
         }
     }
 }

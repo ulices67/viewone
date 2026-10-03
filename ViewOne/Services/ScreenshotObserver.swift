@@ -8,170 +8,171 @@ public final class ScreenshotObserver: NSObject, ObservableObject, PHPhotoLibrar
     public static let shared = ScreenshotObserver()
 
     @Published public private(set) var authorizationStatus: PHAuthorizationStatus = .notDetermined
-    @Published public private(set) var recentScreenshots: [CapturedItem] = []
+    @Published public private(set) var items: [CapturedItem] = []
     @Published public private(set) var isProcessing: Bool = false
+    @Published public private(set) var statusMessage: String = "Iniciando..."
     @Published public var lastCapturedDate: Date?
 
-    private var fetchResult: PHFetchResult<PHAsset>?
-    private let imageManager = PHCachingImageManager()
+    private var imageCache = NSCache<NSString, UIImage>()
+    private var isObserving = false
 
     override private init() {
         super.init()
         self.authorizationStatus = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        if self.authorizationStatus == .authorized || self.authorizationStatus == .limited {
+            startObserving()
+        }
     }
 
-    public func requestPermission() async -> Bool {
+    public func requestPermissionAndSync() async -> Bool {
         let status = await PHPhotoLibrary.requestAuthorization(for: .readWrite)
         self.authorizationStatus = status
+
         if status == .authorized || status == .limited {
             startObserving()
-            loadInitialScreenshots()
+            await syncScreenshots()
             return true
+        } else {
+            self.statusMessage = "Permiso denegado por el usuario"
+            return false
         }
-        return false
     }
 
     public func startObserving() {
+        guard !isObserving else { return }
         PHPhotoLibrary.shared().register(self)
+        self.isObserving = true
     }
 
     public func stopObserving() {
+        guard isObserving else { return }
         PHPhotoLibrary.shared().unregisterChangeObserver(self)
+        self.isObserving = false
     }
 
-    public func loadInitialScreenshots() {
-        let options = PHFetchOptions()
-        options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
-        options.predicate = NSPredicate(
+    // MARK: - Sincronizar Capturas de la Fototeca
+    public func syncScreenshots() async {
+        guard authorizationStatus == .authorized || authorizationStatus == .limited else {
+            return
+        }
+
+        self.isProcessing = true
+        self.statusMessage = "Buscando capturas de pantalla..."
+        defer { self.isProcessing = false }
+
+        // Fetch recent screenshots
+        let fetchOptions = PHFetchOptions()
+        fetchOptions.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
+        fetchOptions.predicate = NSPredicate(
             format: "(mediaSubtype & %d) != 0",
             PHAssetMediaSubtype.photoScreenshot.rawValue
         )
-        options.fetchLimit = 50
+        fetchOptions.fetchLimit = 30
 
-        let result = PHAsset.fetchAssets(with: .image, options: options)
-        self.fetchResult = result
+        let assets = PHAsset.fetchAssets(with: .image, options: fetchOptions)
+        self.statusMessage = "Encontradas \(assets.count) capturas. Procesando..."
 
-        // Process latest screenshots if needed
-        Task {
-            await self.processAssets(result)
+        var existingIdentifiers = Set(VaultManager.shared.items.compactMap { $0.localIdentifier })
+        var newItems: [CapturedItem] = []
+
+        // Procesa hasta 30 capturas recientes de forma concurrente pero segura
+        for i in 0..<assets.count {
+            let asset = assets.object(at: i)
+            if existingIdentifiers.contains(asset.localIdentifier) {
+                continue // Ya procesada previamente
+            }
+
+            if let image = await fetchHighQualityImage(for: asset) {
+                // Guarda en memoria caché inmediata
+                self.imageCache.setObject(image, forKey: asset.localIdentifier as NSString)
+
+                // Analizar con Vision OCR
+                do {
+                    let analysis = try await VisionAnalyzer.shared.analyze(image: image)
+                    var item = CapturedItem(
+                        id: UUID(),
+                        createdAt: asset.creationDate ?? Date(),
+                        sourceApp: analysis.estimatedApp,
+                        recognizedText: analysis.fullText,
+                        extractedLinks: analysis.detectedLinks,
+                        detectedQRCodes: analysis.qrCodes,
+                        detectedUsernames: analysis.usernames,
+                        detectedPhoneNumbers: analysis.phoneNumbers,
+                        isVaultProtected: true,
+                        expiresAt: nil,
+                        relativeImagePath: "",
+                        duplicateHash: analysis.contentHash,
+                        localIdentifier: asset.localIdentifier
+                    )
+
+                    // Cifrar y guardar en disco en VaultManager
+                    try VaultManager.shared.encryptAndSave(image: image, metadata: &item)
+                    existingIdentifiers.insert(asset.localIdentifier)
+                    newItems.append(item)
+                } catch {
+                    print("Error analizando captura \(asset.localIdentifier): \(error.localizedDescription)")
+                }
+            }
         }
+
+        // Refrescar lista de items
+        self.items = VaultManager.shared.items
+        self.statusMessage = "Listo (\(self.items.count) capturas organizadas)"
     }
 
-    // MARK: - PHPhotoLibraryChangeObserver
+    // MARK: - PHPhotoLibraryChangeObserver (En tiempo real)
     public nonisolated func photoLibraryDidChange(_ changeInstance: PHChange) {
         Task { @MainActor in
-            guard let currentFetch = self.fetchResult,
-                  let details = changeInstance.changeDetails(for: currentFetch) else {
-                return
+            // Cuando la fototeca cambia (ej. el usuario hace una captura de pantalla en cualquier app)
+            // volvemos a sincronizar inmediatamente
+            await self.syncScreenshots()
+        }
+    }
+
+    // MARK: - Extracción limpia y asíncrona de imagen desde PHAsset
+    private func fetchHighQualityImage(for asset: PHAsset) async -> UIImage? {
+        await withCheckedContinuation { continuation in
+            let options = PHImageRequestOptions()
+            options.deliveryMode = .highQualityFormat
+            options.isNetworkAccessAllowed = true
+            options.isSynchronous = false
+
+            var hasResumed = false
+
+            PHImageManager.default().requestImage(
+                for: asset,
+                targetSize: CGSize(width: 1170, height: 2532),
+                contentMode: .aspectFit,
+                options: options
+            ) { image, info in
+                let isDegraded = (info?[PHImageResultIsDegradedKey] as? Bool) ?? false
+                if !isDegraded && !hasResumed {
+                    hasResumed = true
+                    continuation.resume(returning: image)
+                }
             }
 
-            self.fetchResult = details.fetchResultAfterChanges
-
-            // Detect newly inserted screenshots
-            let inserted = details.insertedObjects
-            if !inserted.isEmpty {
-                for asset in inserted {
-                    await self.processSingleAsset(asset)
+            // Fallback por si tarda o falla
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+                if !hasResumed {
+                    hasResumed = true
+                    continuation.resume(returning: nil)
                 }
             }
         }
     }
 
-    private func processAssets(_ assets: PHFetchResult<PHAsset>) async {
-        self.isProcessing = true
-        defer { self.isProcessing = false }
-
-        var items: [CapturedItem] = []
-        let group = DispatchGroup()
-
-        assets.enumerateObjects { asset, index, stop in
-            if index >= 30 {
-                stop.pointee = true
-                return
-            }
-            group.enter()
-            self.fetchImage(for: asset) { image in
-                defer { group.leave() }
-                guard let image = image else { return }
-
-                // Quick placeholder
-                let item = CapturedItem(
-                    id: UUID(),
-                    createdAt: asset.creationDate ?? Date(),
-                    sourceApp: .unknown,
-                    recognizedText: "",
-                    extractedLinks: [],
-                    detectedQRCodes: [],
-                    detectedUsernames: [],
-                    detectedPhoneNumbers: [],
-                    isVaultProtected: false,
-                    expiresAt: nil,
-                    relativeImagePath: ""
-                )
-                items.append(item)
-            }
+    // MARK: - Recuperar Imagen desde Caché o Vault
+    public func getImage(for item: CapturedItem) -> UIImage? {
+        if let localId = item.localIdentifier, let cached = imageCache.object(forKey: localId as NSString) {
+            return cached
         }
-
-        group.wait()
-        self.recentScreenshots = items
-    }
-
-    private func processSingleAsset(_ asset: PHAsset) async {
-        self.isProcessing = true
-        defer { self.isProcessing = false }
-
-        self.lastCapturedDate = asset.creationDate ?? Date()
-
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            self.fetchImage(for: asset) { image in
-                guard let image = image else {
-                    continuation.resume()
-                    return
-                }
-
-                Task {
-                    do {
-                        let analysis = try await VisionAnalyzer.shared.analyze(image: image)
-                        var item = CapturedItem(
-                            id: UUID(),
-                            createdAt: asset.creationDate ?? Date(),
-                            sourceApp: analysis.estimatedApp,
-                            recognizedText: analysis.fullText,
-                            extractedLinks: analysis.detectedLinks,
-                            detectedQRCodes: analysis.qrCodes,
-                            detectedUsernames: analysis.usernames,
-                            detectedPhoneNumbers: analysis.phoneNumbers,
-                            isVaultProtected: true,
-                            expiresAt: Calendar.current.date(byAdding: .hour, value: 24, to: Date()),
-                            relativeImagePath: "",
-                            duplicateHash: analysis.contentHash
-                        )
-
-                        // Save securely in Vault
-                        try VaultManager.shared.encryptAndSave(image: image, metadata: &item)
-                        self.recentScreenshots.insert(item, at: 0)
-                    } catch {
-                        print("Error procesando screenshot: \(error.localizedDescription)")
-                    }
-                    continuation.resume()
-                }
+        if let decrypted = VaultManager.shared.decryptImage(for: item) {
+            if let localId = item.localIdentifier {
+                imageCache.setObject(decrypted, forKey: localId as NSString)
             }
+            return decrypted
         }
-    }
-
-    private func fetchImage(for asset: PHAsset, completion: @escaping (UIImage?) -> Void) {
-        let options = PHImageRequestOptions()
-        options.isSynchronous = false
-        options.deliveryMode = .highQualityFormat
-        options.isNetworkAccessAllowed = true
-
-        imageManager.requestImage(
-            for: asset,
-            targetSize: CGSize(width: 1080, height: 1920),
-            contentMode: .aspectFit,
-            options: options
-        ) { image, _ in
-            completion(image)
-        }
+        return nil
     }
 }

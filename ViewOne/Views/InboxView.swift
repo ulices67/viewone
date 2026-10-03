@@ -16,14 +16,7 @@ public struct InboxView: View {
     public init() {}
 
     private var allItems: [CapturedItem] {
-        // Combina los items detectados por el observer y los del vault
-        var list = vaultManager.items
-        for item in observer.recentScreenshots {
-            if !list.contains(where: { $0.id == item.id }) {
-                list.append(item)
-            }
-        }
-        return list
+        return observer.items.isEmpty ? vaultManager.items : observer.items
     }
 
     private var filteredItems: [CapturedItem] {
@@ -51,7 +44,21 @@ public struct InboxView: View {
     public var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                // Category Pills (Instagram 23, WhatsApp 17, etc.)
+                // Processing or Status Bar
+                if observer.isProcessing {
+                    HStack(spacing: 8) {
+                        ProgressView()
+                            .scaleEffect(0.8)
+                        Text(observer.statusMessage)
+                            .font(.caption.bold())
+                            .foregroundColor(.blue)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 6)
+                    .background(Color.blue.opacity(0.1))
+                }
+
+                // Category Pills (Instagram, WhatsApp, etc.)
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
                         Button {
@@ -111,7 +118,7 @@ public struct InboxView: View {
                 // Content View
                 if observer.authorizationStatus != .authorized && observer.authorizationStatus != .limited {
                     permissionBanner
-                } else if filteredItems.isEmpty {
+                } else if filteredItems.isEmpty && !observer.isProcessing {
                     emptyStateView
                 } else {
                     ScrollView {
@@ -125,16 +132,31 @@ public struct InboxView: View {
                         }
                         .padding()
                     }
+                    .refreshable {
+                        await observer.syncScreenshots()
+                    }
                 }
             }
             .navigationTitle("Screenshot Inbox")
             .searchable(text: $searchText, prompt: "Buscar en texto OCR, enlaces o perfiles...")
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    if observer.isProcessing {
-                        ProgressView()
-                            .progressViewStyle(CircularProgressViewStyle())
+                    Button {
+                        Task {
+                            await observer.syncScreenshots()
+                        }
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.body.weight(.semibold))
                     }
+                    .disabled(observer.isProcessing)
+                }
+            }
+            .task {
+                if observer.authorizationStatus == .notDetermined {
+                    _ = await observer.requestPermissionAndSync()
+                } else {
+                    await observer.syncScreenshots()
                 }
             }
         }
@@ -150,7 +172,7 @@ public struct InboxView: View {
             Text("Acceso a Capturas")
                 .font(.title2.bold())
 
-            Text("ViewOne utiliza PhotoKit para detectar cuando tomas un screenshot (Botón lateral + Volumen arriba) y organizarlo al instante con Vision OCR.")
+            Text("Para organizar automáticamente las capturas que tomas en WhatsApp, Instagram, Safari y otras apps, ViewOne necesita permiso de lectura en Fotos.")
                 .font(.subheadline)
                 .multilineTextAlignment(.center)
                 .foregroundColor(.secondary)
@@ -158,7 +180,7 @@ public struct InboxView: View {
 
             Button {
                 Task {
-                    _ = await observer.requestPermission()
+                    _ = await observer.requestPermissionAndSync()
                 }
             } label: {
                 Text("Permitir Acceso a Fototeca")
@@ -181,14 +203,32 @@ public struct InboxView: View {
                 .font(.system(size: 48))
                 .foregroundColor(.secondary)
 
-            Text("No hay capturas")
+            Text("No hay capturas detectadas")
                 .font(.headline)
 
-            Text("Toma una captura de pantalla en cualquier app para que aparezca clasificada automáticamente aquí.")
+            Text("Toma una captura de pantalla en cualquier app (Botón Lateral + Volumen Arriba) y pulsa el botón de actualizar arriba.")
                 .font(.subheadline)
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 32)
+
+            Button {
+                Task {
+                    await observer.syncScreenshots()
+                }
+            } label: {
+                HStack {
+                    Image(systemName: "arrow.clockwise")
+                    Text("Buscar capturas ahora")
+                }
+                .font(.subheadline.bold())
+                .padding(.horizontal, 20)
+                .padding(.vertical, 10)
+                .background(Color.blue.opacity(0.12))
+                .foregroundColor(.blue)
+                .clipShape(Capsule())
+            }
+
             Spacer()
         }
     }

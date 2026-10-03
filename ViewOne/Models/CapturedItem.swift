@@ -14,6 +14,7 @@ public struct CapturedItem: Identifiable, Codable, Equatable {
     public var expiresAt: Date?
     public var relativeImagePath: String
     public var duplicateHash: String?
+    public var localIdentifier: String? // Identificador nativo en PhotoKit (PHAsset)
 
     public init(
         id: UUID = UUID(),
@@ -27,7 +28,8 @@ public struct CapturedItem: Identifiable, Codable, Equatable {
         isVaultProtected: Bool = false,
         expiresAt: Date? = nil,
         relativeImagePath: String = "",
-        duplicateHash: String? = nil
+        duplicateHash: String? = nil,
+        localIdentifier: String? = nil
     ) {
         self.id = id
         self.createdAt = createdAt
@@ -41,6 +43,7 @@ public struct CapturedItem: Identifiable, Codable, Equatable {
         self.expiresAt = expiresAt
         self.relativeImagePath = relativeImagePath
         self.duplicateHash = duplicateHash
+        self.localIdentifier = localIdentifier
     }
 
     public var isExpired: Bool {

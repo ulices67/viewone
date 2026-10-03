@@ -15,15 +15,20 @@ struct ViewOneApp: App {
                 .environmentObject(captureEngine)
                 .onAppear {
                     vaultManager.purgeExpiredItems()
+                    Task {
+                        _ = await screenshotObserver.requestPermissionAndSync()
+                    }
                 }
                 .onChange(of: scenePhase) { newPhase in
                     switch newPhase {
                     case .background:
-                        // Automatically lock vault when moving to background
                         vaultManager.lockVault()
                         vaultManager.purgeExpiredItems()
                     case .active:
                         vaultManager.purgeExpiredItems()
+                        Task {
+                            await screenshotObserver.syncScreenshots()
+                        }
                     default:
                         break
                     }

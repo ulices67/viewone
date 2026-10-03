@@ -227,7 +227,7 @@ public struct DetailCaptureView: View {
             }
         )
         .onAppear {
-            self.decryptedImage = vaultManager.decryptImage(for: item)
+            self.decryptedImage = ScreenshotObserver.shared.getImage(for: item)
         }
     }
 
