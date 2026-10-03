@@ -21,6 +21,7 @@
 		30000000000000000000000C /* QuickCaptureView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000000C /* QuickCaptureView.swift */; };
 		30000000000000000000000D /* VaultView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000000D /* VaultView.swift */; };
 		30000000000000000000000E /* MainTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000000E /* MainTabView.swift */; };
+		300000000000000000000010 /* SystemBroadcastPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000010 /* SystemBroadcastPicker.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -39,6 +40,7 @@
 		20000000000000000000000C /* QuickCaptureView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickCaptureView.swift; sourceTree = "<group>"; };
 		20000000000000000000000D /* VaultView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultView.swift; sourceTree = "<group>"; };
 		20000000000000000000000E /* MainTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainTabView.swift; sourceTree = "<group>"; };
+		200000000000000000000010 /* SystemBroadcastPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemBroadcastPicker.swift; sourceTree = "<group>"; };
 		20000000000000000000000F /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -127,6 +129,7 @@
 			children = (
 				200000000000000000000008 /* AppTagBadge.swift */,
 				200000000000000000000009 /* CaptureCardView.swift */,
+				200000000000000000000010 /* SystemBroadcastPicker.swift */,
 			);
 			path = Components;
 			sourceTree = "<group>";
@@ -221,6 +224,7 @@
 				30000000000000000000000C /* QuickCaptureView.swift in Sources */,
 				30000000000000000000000D /* VaultView.swift in Sources */,
 				30000000000000000000000E /* MainTabView.swift in Sources */,
+				300000000000000000000010 /* SystemBroadcastPicker.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
